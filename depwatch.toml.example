@@ -1,0 +1,6 @@
+slack_webhook_url = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+
+repos = [
+  "owner/repo1",
+  "owner/repo2",
+]

@@ -1,0 +1,50 @@
+[project]
+name = "depwatch"
+version = "0.1.0"
+description = "Monitor GitHub repos for stuck Dependabot PRs and notify via Slack"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Ryan Duryea", email = "aguynamedryan@gmail.com" }
+]
+requires-python = ">=3.13"
+keywords = ["dependabot", "github", "slack", "monitoring"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+]
+dependencies = [
+    "click>=8.3.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/aguynamedryan/depwatch"
+Repository = "https://github.com/aguynamedryan/depwatch"
+Issues = "https://github.com/aguynamedryan/depwatch/issues"
+
+[project.scripts]
+depwatch = "depwatch.cli:cli"
+
+[build-system]
+requires = ["uv_build>=0.8.3,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.9.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
