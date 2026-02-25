@@ -174,9 +174,17 @@ def format_slack_security_message(alerts: list[SecurityAlert]) -> dict:
 
     for alert in sorted_alerts:
         severity_upper = alert.severity.upper()
-        patched = f" (fix: {alert.patched_version})" if alert.patched_version else " (no fix available)"
+        if alert.patched_version:
+            patched = f" (fix: {alert.patched_version})"
+        else:
+            patched = " (no fix available)"
+        link = (
+            f"<{alert.advisory_url}"
+            f"|{alert.package} {alert.vulnerable_range}>"
+        )
         lines.append(
-            f"• [{severity_upper}] *{alert.repo}*: <{alert.advisory_url}|{alert.package} {alert.vulnerable_range}>{patched}\n"
+            f"• [{severity_upper}] *{alert.repo}*: "
+            f"{link}{patched}\n"
             f"  _{alert.summary}_"
         )
 
