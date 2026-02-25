@@ -178,15 +178,8 @@ def format_slack_security_message(alerts: list[SecurityAlert]) -> dict:
             patched = f" (fix: {alert.patched_version})"
         else:
             patched = " (no fix available)"
-        link = (
-            f"<{alert.advisory_url}"
-            f"|{alert.package} {alert.vulnerable_range}>"
-        )
-        lines.append(
-            f"• [{severity_upper}] *{alert.repo}*: "
-            f"{link}{patched}\n"
-            f"  _{alert.summary}_"
-        )
+        link = f"<{alert.advisory_url}|{alert.package} {alert.vulnerable_range}>"
+        lines.append(f"• [{severity_upper}] *{alert.repo}*: {link}{patched}\n  _{alert.summary}_")
 
     return {"text": "\n".join(lines)}
 
