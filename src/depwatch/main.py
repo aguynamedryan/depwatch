@@ -26,6 +26,21 @@ class DependabotPR:
         return delta.days
 
 
+SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+@dataclass
+class SecurityAlert:
+    repo: str
+    severity: str
+    package: str
+    ecosystem: str
+    vulnerable_range: str
+    patched_version: str | None
+    advisory_url: str
+    summary: str
+
+
 def load_config(config_path: Path) -> dict:
     """Load and return the TOML config file."""
     print(f"[debug] Loading config from {config_path}")
@@ -78,6 +93,58 @@ def fetch_dependabot_prs(repo: str) -> list[DependabotPR]:
     return prs
 
 
+def fetch_security_alerts(repo: str) -> list[SecurityAlert]:
+    """Fetch open Dependabot security alerts for a single repo using `gh api`."""
+    print(f"[debug] Checking security alerts for {repo}...")
+    cmd = [
+        "gh",
+        "api",
+        f"/repos/{repo}/dependabot/alerts",
+        "--jq",
+        '[.[] | select(.state == "open") | {'
+        "number, severity: .security_advisory.severity,"
+        "package: .dependency.package.name,"
+        "ecosystem: .dependency.package.ecosystem,"
+        "vulnerable_range: .security_vulnerability.vulnerable_version_range,"
+        "patched_version: (.security_vulnerability.first_patched_version.identifier // null),"
+        "advisory_url: .html_url,"
+        "summary: .security_advisory.summary"
+        "}]",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"gh api dependabot/alerts failed for {repo}: {result.stderr.strip()}")
+
+    alerts_data = json.loads(result.stdout)
+    alerts = []
+    for alert in alerts_data:
+        alerts.append(
+            SecurityAlert(
+                repo=repo,
+                severity=alert["severity"],
+                package=alert["package"],
+                ecosystem=alert["ecosystem"],
+                vulnerable_range=alert["vulnerable_range"],
+                patched_version=alert.get("patched_version"),
+                advisory_url=alert["advisory_url"],
+                summary=alert["summary"],
+            )
+        )
+
+    print(f"[debug]   Found {len(alerts)} open security alert(s)")
+    return alerts
+
+
+def check_all_repos_security(repos: list[str]) -> list[SecurityAlert]:
+    """Check all configured repos and return any open security alerts."""
+    all_alerts = []
+    for repo in repos:
+        alerts = fetch_security_alerts(repo)
+        all_alerts.extend(alerts)
+    return all_alerts
+
+
 def check_all_repos(repos: list[str]) -> list[DependabotPR]:
     """Check all configured repos and return any open Dependabot PRs."""
     all_prs = []
@@ -95,6 +162,23 @@ def format_slack_message(prs: list[DependabotPR]) -> dict:
         age = pr.age_days
         age_str = f"{age} day{'s' if age != 1 else ''}"
         lines.append(f"• *{pr.repo}*: <{pr.url}|{pr.title}> ({age_str} old)")
+
+    return {"text": "\n".join(lines)}
+
+
+def format_slack_security_message(alerts: list[SecurityAlert]) -> dict:
+    """Format security alerts into a Slack webhook payload."""
+    lines = [f"*:rotating_light: {len(alerts)} open Dependabot security alert(s) found:*\n"]
+
+    sorted_alerts = sorted(alerts, key=lambda a: SEVERITY_ORDER.get(a.severity, 99))
+
+    for alert in sorted_alerts:
+        severity_upper = alert.severity.upper()
+        patched = f" (fix: {alert.patched_version})" if alert.patched_version else " (no fix available)"
+        lines.append(
+            f"• [{severity_upper}] *{alert.repo}*: <{alert.advisory_url}|{alert.package} {alert.vulnerable_range}>{patched}\n"
+            f"  _{alert.summary}_"
+        )
 
     return {"text": "\n".join(lines)}
 

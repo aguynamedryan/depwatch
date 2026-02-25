@@ -90,3 +90,64 @@ class TestCheckCommand:
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
         assert "0.1.0" in result.output
+
+
+def _mock_gh_api_with_alerts(cmd, **kwargs):
+    return type(
+        "Result",
+        (),
+        {
+            "returncode": 0,
+            "stdout": json.dumps(
+                [
+                    {
+                        "severity": "critical",
+                        "package": "requests",
+                        "ecosystem": "pip",
+                        "vulnerable_range": "< 2.32.0",
+                        "patched_version": "2.32.0",
+                        "advisory_url": "https://github.com/owner/repo1/security/dependabot/1",
+                        "summary": "SSRF vulnerability in requests",
+                    }
+                ]
+            ),
+            "stderr": "",
+        },
+    )()
+
+
+def _mock_gh_api_no_alerts(cmd, **kwargs):
+    return type("Result", (), {"returncode": 0, "stdout": "[]", "stderr": ""})()
+
+
+class TestSecurityCommand:
+    def test_dry_run_shows_output(self, config_file: Path) -> None:
+        runner = CliRunner()
+        with patch("depwatch.main.subprocess.run", side_effect=_mock_gh_api_with_alerts):
+            result = runner.invoke(cli, ["security", "--config", str(config_file), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "[dry-run]" in result.output
+        assert "CRITICAL" in result.output
+        assert "requests" in result.output
+
+    def test_no_alerts_exits_cleanly(self, config_file: Path) -> None:
+        runner = CliRunner()
+        with patch("depwatch.main.subprocess.run", side_effect=_mock_gh_api_no_alerts):
+            result = runner.invoke(cli, ["security", "--config", str(config_file)])
+
+        assert result.exit_code == 0
+        assert "All clear" in result.output
+
+    def test_posts_to_slack_when_alerts_found(self, config_file: Path) -> None:
+        runner = CliRunner()
+        with (
+            patch("depwatch.main.subprocess.run", side_effect=_mock_gh_api_with_alerts),
+            patch("depwatch.cli.post_to_slack") as mock_post,
+        ):
+            result = runner.invoke(cli, ["security", "--config", str(config_file)])
+
+        assert result.exit_code == 0
+        mock_post.assert_called_once()
+        webhook_url = mock_post.call_args[0][0]
+        assert webhook_url == "https://hooks.slack.com/services/XXX/YYY/ZZZ"

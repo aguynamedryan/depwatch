@@ -11,9 +11,13 @@ import pytest
 
 from depwatch.main import (
     DependabotPR,
+    SecurityAlert,
     check_all_repos,
+    check_all_repos_security,
+    fetch_security_alerts,
     fetch_dependabot_prs,
     format_slack_message,
+    format_slack_security_message,
     load_config,
 )
 
@@ -195,3 +199,200 @@ class TestDependabotPR:
         )
         # age_days depends on current time, just verify it's non-negative
         assert pr.age_days >= 0
+
+
+# --- Security alert tests ---
+
+
+@pytest.fixture
+def sample_alerts() -> list[SecurityAlert]:
+    return [
+        SecurityAlert(
+            repo="owner/repo1",
+            severity="critical",
+            package="requests",
+            ecosystem="pip",
+            vulnerable_range="< 2.32.0",
+            patched_version="2.32.0",
+            advisory_url="https://github.com/owner/repo1/security/dependabot/1",
+            summary="SSRF vulnerability in requests",
+        ),
+        SecurityAlert(
+            repo="owner/repo2",
+            severity="high",
+            package="lodash",
+            ecosystem="npm",
+            vulnerable_range="< 4.17.21",
+            patched_version="4.17.21",
+            advisory_url="https://github.com/owner/repo2/security/dependabot/5",
+            summary="Prototype pollution in lodash",
+        ),
+        SecurityAlert(
+            repo="owner/repo1",
+            severity="low",
+            package="urllib3",
+            ecosystem="pip",
+            vulnerable_range="< 2.0.7",
+            patched_version=None,
+            advisory_url="https://github.com/owner/repo1/security/dependabot/3",
+            summary="Minor info leak in urllib3",
+        ),
+    ]
+
+
+def _gh_api_alerts_json() -> str:
+    return json.dumps(
+        [
+            {
+                "severity": "critical",
+                "package": "requests",
+                "ecosystem": "pip",
+                "vulnerable_range": "< 2.32.0",
+                "patched_version": "2.32.0",
+                "advisory_url": "https://github.com/owner/repo1/security/dependabot/1",
+                "summary": "SSRF vulnerability in requests",
+            }
+        ]
+    )
+
+
+class TestFetchSecurityAlerts:
+    def test_returns_alerts_from_gh_output(self) -> None:
+        mock_result = type(
+            "Result", (), {"returncode": 0, "stdout": _gh_api_alerts_json(), "stderr": ""}
+        )()
+
+        with patch("depwatch.main.subprocess.run", return_value=mock_result):
+            alerts = fetch_security_alerts("owner/repo1")
+
+        assert len(alerts) == 1
+        assert alerts[0].repo == "owner/repo1"
+        assert alerts[0].severity == "critical"
+        assert alerts[0].package == "requests"
+        assert alerts[0].patched_version == "2.32.0"
+
+    def test_returns_empty_list_when_no_alerts(self) -> None:
+        mock_result = type("Result", (), {"returncode": 0, "stdout": "[]", "stderr": ""})()
+
+        with patch("depwatch.main.subprocess.run", return_value=mock_result):
+            alerts = fetch_security_alerts("owner/repo1")
+
+        assert alerts == []
+
+    def test_raises_on_gh_failure(self) -> None:
+        mock_result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "forbidden"})()
+
+        with (
+            patch("depwatch.main.subprocess.run", return_value=mock_result),
+            pytest.raises(RuntimeError, match="gh api dependabot/alerts failed"),
+        ):
+            fetch_security_alerts("owner/repo1")
+
+    def test_handles_null_patched_version(self) -> None:
+        gh_output = json.dumps(
+            [
+                {
+                    "severity": "low",
+                    "package": "urllib3",
+                    "ecosystem": "pip",
+                    "vulnerable_range": "< 2.0.7",
+                    "patched_version": None,
+                    "advisory_url": "https://github.com/owner/repo1/security/dependabot/3",
+                    "summary": "Minor info leak",
+                }
+            ]
+        )
+        mock_result = type("Result", (), {"returncode": 0, "stdout": gh_output, "stderr": ""})()
+
+        with patch("depwatch.main.subprocess.run", return_value=mock_result):
+            alerts = fetch_security_alerts("owner/repo1")
+
+        assert alerts[0].patched_version is None
+
+
+class TestCheckAllReposSecurity:
+    def test_aggregates_alerts_from_multiple_repos(self) -> None:
+        gh_outputs = {
+            "owner/repo1": json.dumps(
+                [
+                    {
+                        "severity": "critical",
+                        "package": "requests",
+                        "ecosystem": "pip",
+                        "vulnerable_range": "< 2.32.0",
+                        "patched_version": "2.32.0",
+                        "advisory_url": "https://github.com/owner/repo1/security/dependabot/1",
+                        "summary": "SSRF vulnerability",
+                    }
+                ]
+            ),
+            "owner/repo2": json.dumps(
+                [
+                    {
+                        "severity": "high",
+                        "package": "lodash",
+                        "ecosystem": "npm",
+                        "vulnerable_range": "< 4.17.21",
+                        "patched_version": "4.17.21",
+                        "advisory_url": "https://github.com/owner/repo2/security/dependabot/5",
+                        "summary": "Prototype pollution",
+                    }
+                ]
+            ),
+        }
+
+        def mock_run(cmd, **kwargs):
+            # Extract repo from the gh api URL pattern: /repos/{repo}/dependabot/alerts
+            for arg in cmd:
+                if arg.startswith("/repos/"):
+                    repo = "/".join(arg.split("/")[2:4])
+                    break
+            return type("Result", (), {"returncode": 0, "stdout": gh_outputs[repo], "stderr": ""})()
+
+        with patch("depwatch.main.subprocess.run", side_effect=mock_run):
+            alerts = check_all_repos_security(["owner/repo1", "owner/repo2"])
+
+        assert len(alerts) == 2
+        assert {a.repo for a in alerts} == {"owner/repo1", "owner/repo2"}
+
+
+class TestFormatSlackSecurityMessage:
+    def test_formats_message_with_alerts(self, sample_alerts: list[SecurityAlert]) -> None:
+        payload = format_slack_security_message(sample_alerts)
+        text = payload["text"]
+        assert "3 open Dependabot security alert(s)" in text
+        assert "owner/repo1" in text
+        assert "owner/repo2" in text
+        assert "CRITICAL" in text
+        assert "HIGH" in text
+        assert "LOW" in text
+
+    def test_critical_alerts_listed_first(self, sample_alerts: list[SecurityAlert]) -> None:
+        payload = format_slack_security_message(sample_alerts)
+        text = payload["text"]
+        critical_pos = text.index("CRITICAL")
+        high_pos = text.index("HIGH")
+        low_pos = text.index("LOW")
+        assert critical_pos < high_pos < low_pos
+
+    def test_shows_patched_version(self, sample_alerts: list[SecurityAlert]) -> None:
+        payload = format_slack_security_message(sample_alerts)
+        text = payload["text"]
+        assert "fix: 2.32.0" in text
+
+    def test_shows_no_fix_when_unpatched(self, sample_alerts: list[SecurityAlert]) -> None:
+        payload = format_slack_security_message(sample_alerts)
+        text = payload["text"]
+        assert "no fix available" in text
+
+    def test_includes_advisory_urls(self, sample_alerts: list[SecurityAlert]) -> None:
+        payload = format_slack_security_message(sample_alerts)
+        text = payload["text"]
+        assert "security/dependabot/1" in text
+        assert "security/dependabot/5" in text
+
+    def test_includes_summaries(self, sample_alerts: list[SecurityAlert]) -> None:
+        payload = format_slack_security_message(sample_alerts)
+        text = payload["text"]
+        assert "SSRF vulnerability" in text
+        assert "Prototype pollution" in text
