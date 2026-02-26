@@ -26,6 +26,20 @@ class DependabotPR:
         return delta.days
 
 
+@dataclass
+class OpenPR:
+    repo: str
+    title: str
+    url: str
+    author: str
+    created_at: datetime
+
+    @property
+    def age_days(self) -> int:
+        delta = datetime.now(UTC) - self.created_at
+        return delta.days
+
+
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
@@ -114,6 +128,9 @@ def fetch_security_alerts(repo: str) -> list[SecurityAlert]:
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        if "Dependabot alerts are disabled" in result.stderr:
+            print("[debug]   Dependabot alerts disabled, skipping")
+            return []
         raise RuntimeError(f"gh api dependabot/alerts failed for {repo}: {result.stderr.strip()}")
 
     alerts_data = json.loads(result.stdout)
@@ -136,6 +153,52 @@ def fetch_security_alerts(repo: str) -> list[SecurityAlert]:
     return alerts
 
 
+def fetch_open_prs(repo: str) -> list[OpenPR]:
+    """Fetch all open PRs for a single repo using `gh`."""
+    print(f"[debug] Checking {repo}...")
+    cmd = [
+        "gh",
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--json",
+        "url,title,createdAt,author",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"gh pr list failed for {repo}: {result.stderr.strip()}")
+
+    prs_data = json.loads(result.stdout)
+    prs = []
+    for pr in prs_data:
+        created = datetime.fromisoformat(pr["createdAt"])
+        prs.append(
+            OpenPR(
+                repo=repo,
+                title=pr["title"],
+                url=pr["url"],
+                author=pr["author"]["login"],
+                created_at=created,
+            )
+        )
+
+    print(f"[debug]   Found {len(prs)} open PR(s)")
+    return prs
+
+
+def check_all_repos_prs(repos: list[str]) -> list[OpenPR]:
+    """Check all configured repos and return any open PRs."""
+    all_prs = []
+    for repo in repos:
+        prs = fetch_open_prs(repo)
+        all_prs.extend(prs)
+    return all_prs
+
+
 def check_all_repos_security(repos: list[str]) -> list[SecurityAlert]:
     """Check all configured repos and return any open security alerts."""
     all_alerts = []
@@ -152,6 +215,18 @@ def check_all_repos(repos: list[str]) -> list[DependabotPR]:
         prs = fetch_dependabot_prs(repo)
         all_prs.extend(prs)
     return all_prs
+
+
+def format_slack_prs_message(prs: list[OpenPR]) -> dict:
+    """Format all open PRs into a Slack webhook payload."""
+    lines = [f"*:memo: {len(prs)} open PR(s) found:*\n"]
+
+    for pr in sorted(prs, key=lambda p: p.created_at):
+        age = pr.age_days
+        age_str = f"{age} day{'s' if age != 1 else ''}"
+        lines.append(f"• *{pr.repo}*: <{pr.url}|{pr.title}> by {pr.author} ({age_str} old)")
+
+    return {"text": "\n".join(lines)}
 
 
 def format_slack_message(prs: list[DependabotPR]) -> dict:
