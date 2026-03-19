@@ -8,3 +8,7 @@ build/
 .env
 *.log
 claude_stuff/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

@@ -1,0 +1,8 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_server_port": 3308,
+  "dolt_database": "beads_depwatch",
+  "project_id": "759b43d1-162a-4b32-a629-45794af1f3f8"
+}
