@@ -4,11 +4,37 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 import tomllib
 import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+
+
+def run_gh(cmd: list[str], *, retries: int = MAX_RETRIES) -> subprocess.CompletedProcess:
+    """Run a gh CLI command with retries for transient network errors."""
+    for attempt in range(retries):
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result
+        stderr_lower = result.stderr.lower()
+        is_transient = (
+            "network is unreachable" in stderr_lower
+            or "error connecting to" in stderr_lower
+            or "connection refused" in stderr_lower
+            or "connection reset" in stderr_lower
+        )
+        if is_transient and attempt < retries - 1:
+            delay = RETRY_DELAY * (attempt + 1)
+            print(f"[debug]   Network error, retrying in {delay}s (attempt {attempt + 1}/{retries})...")
+            time.sleep(delay)
+            continue
+        return result
+    return result  # unreachable, but satisfies type checkers
 
 DEFAULT_CONFIG_PATH = Path("~/.config/depwatch/depwatch.toml").expanduser()
 
@@ -86,7 +112,7 @@ def fetch_dependabot_prs(repo: str) -> list[DependabotPR]:
         "url,title,createdAt",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_gh(cmd)
     if result.returncode != 0:
         raise RuntimeError(f"gh pr list failed for {repo}: {result.stderr.strip()}")
 
@@ -126,7 +152,7 @@ def fetch_security_alerts(repo: str) -> list[SecurityAlert]:
         "}]",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_gh(cmd)
     if result.returncode != 0:
         if "Dependabot alerts are disabled" in result.stderr:
             print("[debug]   Dependabot alerts disabled, skipping")
@@ -168,7 +194,7 @@ def fetch_open_prs(repo: str) -> list[OpenPR]:
         "url,title,createdAt,author",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_gh(cmd)
     if result.returncode != 0:
         raise RuntimeError(f"gh pr list failed for {repo}: {result.stderr.strip()}")
 
