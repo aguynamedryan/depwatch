@@ -154,8 +154,8 @@ def fetch_security_alerts(repo: str) -> list[SecurityAlert]:
 
     result = run_gh(cmd)
     if result.returncode != 0:
-        if "Dependabot alerts are disabled" in result.stderr:
-            print("[debug]   Dependabot alerts disabled, skipping")
+        if "Dependabot alerts are disabled" in result.stderr or "archived repositories" in result.stderr:
+            print("[debug]   Dependabot alerts unavailable, skipping")
             return []
         raise RuntimeError(f"gh api dependabot/alerts failed for {repo}: {result.stderr.strip()}")
 
