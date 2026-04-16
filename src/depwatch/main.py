@@ -30,11 +30,15 @@ def run_gh(cmd: list[str], *, retries: int = MAX_RETRIES) -> subprocess.Complete
         )
         if is_transient and attempt < retries - 1:
             delay = RETRY_DELAY * (attempt + 1)
-            print(f"[debug]   Network error, retrying in {delay}s (attempt {attempt + 1}/{retries})...")
+            print(
+                f"[debug]   Network error, retrying in {delay}s "
+                f"(attempt {attempt + 1}/{retries})..."
+            )
             time.sleep(delay)
             continue
         return result
     return result  # unreachable, but satisfies type checkers
+
 
 DEFAULT_CONFIG_PATH = Path("~/.config/depwatch/depwatch.toml").expanduser()
 
@@ -154,10 +158,11 @@ def fetch_security_alerts(repo: str) -> list[SecurityAlert]:
 
     result = run_gh(cmd)
     if result.returncode != 0:
-        if "Dependabot alerts are disabled" in result.stderr or "archived repositories" in result.stderr:
+        stderr = result.stderr
+        if "Dependabot alerts are disabled" in stderr or "archived repositories" in stderr:
             print("[debug]   Dependabot alerts unavailable, skipping")
             return []
-        raise RuntimeError(f"gh api dependabot/alerts failed for {repo}: {result.stderr.strip()}")
+        raise RuntimeError(f"gh api dependabot/alerts failed for {repo}: {stderr.strip()}")
 
     alerts_data = json.loads(result.stdout)
     alerts = []
