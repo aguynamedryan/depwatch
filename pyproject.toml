@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Software Development :: Build Tools",
 ]
 dependencies = [
-    "click>=8.3.3",
+    "click>=8.4.1",
 ]
 
 [project.urls]
