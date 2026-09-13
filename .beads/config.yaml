@@ -41,3 +41,6 @@
 # - github.org
 # - github.repo
 
+
+# Beads sync via the git-backed Dolt remote at refs/dolt/data, driven by the pre-push gate.
+sync.remote: "git+https://github.com/aguynamedryan/depwatch.git"
