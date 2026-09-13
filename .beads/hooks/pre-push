@@ -1,18 +1,24 @@
 #!/usr/bin/env sh
-# beads' pre-push, then publish the beads database. HARD FAIL if it cannot.
-# refs/dolt/data is a non-branch ref that `git push` does not carry, and the tracked
-# JSONL was retired — so this push is the only thing that gets beads off this host.
-root="$(git rev-parse --show-toplevel)"
-if [ -x "$root/.beads/hooks/pre-push" ]; then
-  "$root/.beads/hooks/pre-push" "$@" || exit $?
+# --- BEGIN BEADS INTEGRATION v0.61.0 ---
+# This section is managed by beads. Do not remove these markers.
+if command -v bd >/dev/null 2>&1; then
+  export BD_GIT_HOOK=1
+  _bd_timeout=${BEADS_HOOK_TIMEOUT:-30}
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$_bd_timeout" bd hooks run pre-push "$@"
+    _bd_exit=$?
+    if [ $_bd_exit -eq 124 ]; then
+      echo >&2 "beads: hook 'pre-push' timed out after ${_bd_timeout}s — continuing without beads"
+      _bd_exit=0
+    fi
+  else
+    bd hooks run pre-push "$@"
+    _bd_exit=$?
+  fi
+  if [ $_bd_exit -eq 3 ]; then
+    echo >&2 "beads: database not initialized — skipping hook 'pre-push'"
+    _bd_exit=0
+  fi
+  if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
-command -v bd >/dev/null 2>&1 || exit 0
-[ -d "$root/.beads" ] || exit 0
-grep -q '^sync\.remote:' "$root/.beads/config.yaml" 2>/dev/null || exit 0
-cd "$root" || exit 1
-out="$(bd dolt push 2>&1)" || {
-  printf '\n  BEADS DOLT PUSH FAILED — refusing the git push\n%s\n' "$out" >&2
-  printf '  Your beads are NOT published; the JSONL no longer backs this up.\n\n' >&2
-  exit 1
-}
-echo "beads: dolt push ok"
+# --- END BEADS INTEGRATION v0.61.0 ---
