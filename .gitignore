@@ -12,3 +12,7 @@ claude_stuff/
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Beads syncs via the Dolt remote (refs/dolt/data), driven by the pre-push gate.
+# This export is a local leftover — not the sync channel, not a backup.
+.beads/issues.jsonl
